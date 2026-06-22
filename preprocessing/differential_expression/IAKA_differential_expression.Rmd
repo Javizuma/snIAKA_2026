@@ -1,0 +1,144 @@
+---
+title: "differential_expression"
+author: "Javier_Villegas"
+date: "2026-06-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Load required libraries
+library(Seurat)     # For handling single-cell and pseudobulk Seurat objects
+library(DESeq2)     # For differential expression analysis
+library(dplyr)      # For combining and filtering results
+```
+
+
+```{r setup, include=FALSE}
+
+# Aggregate raw counts per condition, sample, and cell class
+pseudo_classes_KA <- AggregateExpression(
+  KA_seurat_plots,
+  assays = "RNA",
+  slot = "counts",
+  group.by = c("condition", "sample.origin", "classes"),
+  return.seurat = TRUE
+)
+
+pseudo_classes_KA$classes_cond <- paste(
+  pseudo_classes_KA$classes,
+  pseudo_classes_KA$condition,
+  sep = "_"
+)
+
+Idents(pseudo_classes_KA) <- pseudo_classes_KA$classes_cond
+
+cell_classes <- unique(pseudo_classes_KA$classes)
+
+# Store DESeq2 results and objects
+de_result_classes_pseudo_DESeq2_list <- list()
+dds_classes_pseudo_list <- list()
+res_classes_pseudo_list <- list()
+
+for (cell_class in cell_classes) {
+
+  epi_id <- paste0(cell_class, "_Epi")
+  control_id <- paste0(cell_class, "_Control")
+
+  n_epi <- sum(pseudo_classes_KA$classes_cond == epi_id)
+  n_control <- sum(pseudo_classes_KA$classes_cond == control_id)
+
+  # Run DESeq2 only when there are at least two pseudobulk samples per condition
+  if (n_epi > 1 && n_control > 1) {
+
+    meta <- pseudo_classes_KA@meta.data
+
+    epi_cells <- rownames(meta)[meta$classes_cond == epi_id]
+    control_cells <- rownames(meta)[meta$classes_cond == control_id]
+    cells_to_keep <- c(epi_cells, control_cells)
+
+    counts_mat <- GetAssayData(
+      pseudo_classes_KA,
+      assay = "RNA",
+      slot = "counts"
+    )[, cells_to_keep, drop = FALSE]
+
+    sample_info <- data.frame(row.names = cells_to_keep)
+    sample_info[epi_cells, "group"] <- "Epi"
+    sample_info[control_cells, "group"] <- "Control"
+    sample_info$group <- factor(sample_info$group, levels = c("Control", "Epi"))
+    sample_info$wellKey <- rownames(sample_info)
+
+    dds <- DESeqDataSetFromMatrix(
+      countData = counts_mat,
+      colData = sample_info,
+      design = ~ group
+    )
+
+    dds <- estimateSizeFactors(dds)
+    dds <- estimateDispersions(dds, fitType = "local")
+    dds <- nbinomWaldTest(dds)
+
+    res <- results(
+      dds,
+      contrast = c("group", "Epi", "Control"),
+      alpha = 0.05
+    )
+
+    res <- res[
+      complete.cases(res$pvalue) &
+        complete.cases(res$padj) &
+        complete.cases(res$log2FoldChange),
+    ]
+
+    de_res_df <- data.frame(
+      p_val = res$pvalue,
+      p_adj_BH = res$padj,
+      log2FC = res$log2FoldChange,
+      stat = res$stat,
+      baseMean = res$baseMean,
+      row.names = rownames(res)
+    )
+
+    de_result_classes_pseudo_DESeq2_list[[cell_class]] <- de_res_df
+    dds_classes_pseudo_list[[cell_class]] <- dds
+    res_classes_pseudo_list[[cell_class]] <- res
+
+  } else {
+    message(
+      "Skipping ", cell_class,
+      ": not enough pseudobulk samples in one or both conditions."
+    )
+  }
+}
+
+# Save results
+results_dir <- file.path(
+  "results",
+  "pseudo_differential_expression",
+  "deseq2_classes_pseudo",
+  as.character(Sys.Date())
+)
+
+dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
+
+for (cell_class in names(de_result_classes_pseudo_DESeq2_list)) {
+
+  filename <- paste0(
+    cell_class,
+    "_",
+    Sys.Date(),
+    "_DESeq2_DE_results.csv"
+  )
+
+  full_path <- file.path(results_dir, filename)
+
+  write.csv(
+    de_result_classes_pseudo_DESeq2_list[[cell_class]],
+    file = full_path,
+    row.names = TRUE
+  )
+
+  message("Results for ", cell_class, " saved to: ", full_path)
+}
+
+```

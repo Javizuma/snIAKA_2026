@@ -1,0 +1,64 @@
+---
+title: "IAKA_QC"
+author: "Javier Villegas"
+date: "2025-11-28"
+output: html_document
+---
+
+```{r setup}
+library(Seurat)
+library(tidyverse)
+
+#Creating the output folder in case it's not there 
+
+output_dir <- paste0(getwd(),"/output/")
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)}
+
+```
+
+
+###Creating seurat object and filtering
+```{r Creating Seurat objects}
+#Read barcode matrix
+KA1 <- Read10X_h5("../Count_matrices/KA1_matrix.h5")
+KA2 <- Read10X_h5("../Count_matrices/KA2_matrix.h5")
+KA3 <- Read10X_h5("../Count_matrices/KA3_matrix.h5")
+KA4 <- Read10X_h5("../Count_matrices/KA4_matrix.h5")
+
+
+PBS1 <- Read10X_h5("../Count_matrices/PBS1_matrix.h5")
+PBS2 <- Read10X_h5("../Count_matrices/PBS2_matrix.h5")
+PBS3 <- Read10X_h5("../Count_matrices/PBS3_matrix.h5")
+PBS4 <- Read10X_h5("../Count_matrices/PBS4_matrix.h5")
+
+
+
+#Create seurat objects
+KA1_SO <- CreateSeuratObject(counts = KA1)
+KA2_SO  <-CreateSeuratObject(counts = KA2)
+KA3_SO  <-CreateSeuratObject(counts = KA3)
+KA4_SO  <-CreateSeuratObject(counts = KA4)
+
+PBS1_SO <-CreateSeuratObject(counts = PBS1)
+PBS2_SO <-CreateSeuratObject(counts = PBS2)
+PBS3_SO <-CreateSeuratObject(counts = PBS3)
+PBS4_SO <-CreateSeuratObject(counts = PBS4)
+
+# #Merge seurat objects
+KA_seurat <- merge(KA1_SO,y=c(KA2_SO,KA3_SO,KA4_SO,PBS1_SO,PBS2_SO,PBS3_SO,PBS4_SO),add.cell.ids=c("EPI1","EPI2","EPI3","EPI4","Control1","Control2","Control3","Control4"),project="NOV2024_KA",merge.data=T)
+KA_seurat[["RNA"]] <- JoinLayers(KA_seurat[["RNA"]])
+#Add a column on the metadata that reflects sample of origin for each cell
+KA_seurat[["sample.origin"]] <- sapply(X = strsplit(colnames(KA_seurat), split = "_"), FUN = "[", 1)
+Idents(KA_seurat) <- KA_seurat$sample.origin
+KA_seurat$condition <- ifelse(test = KA_seurat$sample.origin %in% c("EPI1","EPI2","EPI3","EPI4"), yes = "KA", no = "PBS")
+KA_seurat[["percent.mt"]] <- PercentageFeatureSet(KA_seurat, pattern = "^mt-")
+
+# Visualize QC metrics as a violin plot
+VlnPlot(KA_seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+ggsave("KA_seurat_prefiltered/KA_seurat_prefiltered_VlnplotQC.jpg" ,plot = VlnPlot(KA_seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),group.by = "sample.origin", ncol = 3),width = 10, height=6,dpi=300)
+
+plot1 <- FeatureScatter(KA_seurat, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(KA_seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```

@@ -1,0 +1,125 @@
+---
+title: "Filtering"
+author: "Javier Villegas"
+date: "2025-12-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(Seurat)
+library(tidyverse)
+set.seed(42)
+```
+
+
+
+```{r Merging of Seurat objects}
+##First we read the srat objects after the initial QC and after running the DoubletFinder software
+srat_KA1 <- readRDS("../Doublets/srat_KA1.rds")
+srat_KA1$DoubletFinder <- srat_KA1$DF.classifications_0.25_0.01_50
+
+srat_KA2 <- readRDS("../Doublets/srat_KA2.rds")
+srat_KA2$DoubletFinder <- srat_KA2$DF.classifications_0.25_0.01_39
+
+srat_KA3 <- readRDS("../Doublets/srat_KA3.rds")
+srat_KA3$DoubletFinder <- srat_KA3$DF.classifications_0.25_0.01_115
+
+srat_KA4 <- readRDS("../Doublets/srat_KA4.rds")
+srat_KA4$DoubletFinder <- srat_KA4$DF.classifications_0.25_0.01_102
+
+
+
+srat_PBS1 <- readRDS("../Doublets/srat_PBS1.rds")
+srat_PBS1$DoubletFinder <- srat_PBS1$DF.classifications_0.25_0.01_94
+
+srat_PBS2 <- readRDS("../Doublets/srat_PBS2.rds")
+srat_PBS2$DoubletFinder <- srat_PBS2$DF.classifications_0.25_0.01_486
+
+srat_PBS3 <- readRDS("../Doublets/srat_PBS3.rds")
+srat_PBS3$DoubletFinder <- srat_PBS3$DF.classifications_0.25_0.02_100
+
+srat_PBS4 <- readRDS("../Doublets/srat_PBS4.rds")
+srat_PBS4$DoubletFinder <- srat_PBS4$DF.classifications_0.25_0.005_112
+# 
+KA_seurat <- merge(srat_KA1,y=c(srat_KA2,srat_KA3,srat_KA4,srat_PBS1,srat_PBS2,srat_PBS3,srat_PBS4),add.cell.ids=c("KA1","KA2","KA3","KA4","PBS1","PBS2","PBS3","PBS4"),project="NOV2024_KA",merge.data=T)
+KA_seurat[["RNA"]] <- JoinLayers(KA_seurat[["RNA"]])
+
+```
+
+
+
+```{r Filtering}
+
+KA_seurat <- SCTransform(KA_seurat)
+KA_seurat <- RunPCA(KA_seurat, features = VariableFeatures(object = KA_seurat))
+KA_seurat <- FindNeighbors(KA_seurat, dims = 1:20)
+KA_seurat <- FindClusters(KA_seurat, resolution = 1)
+KA_seurat <- RunTSNE(KA_seurat, dims = 1:20)
+KA_seurat <- RunUMAP(KA_seurat, dims = 1:20)
+saveRDS(KA_seurat,"KA_seurat_prefiltering.rds")
+
+cluster_markers_prefiltered <- FindAllMarkers(KA_seurat)
+write.csv(cluster_markers_prefiltered, file = "KA_seurat_prefiltered_allmarkers.csv", row.names = TRUE)
+
+DimPlot(KA_seurat,label=T)
+ggsave("KA_seurat_prefiltered_clusters_UMAP.jpg", plot =DimPlot(KA_seurat,label=T),width = 10, height=10,dpi=300)
+DimPlot(KA_seurat,group.by = "DoubletFinder")
+ggsave("KA_seurat_prefiltered_DoubletFinder_UMAP.jpg", plot =DimPlot(KA_seurat,group.by = "DoubletFinder"),width = 10, height=10,dpi=300)
+
+DimPlot(KA_seurat,group.by = "sample.origin")
+ggsave("KA_seurat_prefiltered_sampleOrigin_UMAP.jpg", plot =DimPlot(KA_seurat,group.by = "sample.origin"),width = 10, height=10,dpi=300)
+
+DimPlot(KA_seurat,group.by = "condition")
+ggsave("KA_seurat_prefiltered_condition_UMAP.jpg", plot =DimPlot(KA_seurat,group.by = "condition"),width = 10, height=10,dpi=300)
+
+FeaturePlot(KA_seurat,features = "percent.mt")
+ggsave("KA_seurat_prefiltered_percentmt_UMAP.jpg", plot =FeaturePlot(KA_seurat,features = "percent.mt"),width = 10, height=10,dpi=300)
+
+
+KA_seurat_filtered <- subset(KA_seurat,subset=DoubletFinder=="Singlet")
+
+#Keep subtypes with more than 20 nuclei 
+KA_seurat_filtered<-list("Choroid Plexus", "Vascular cells", "Microglia", "Astrocytes", "Oligodendrocytes",
+                        "Oligo Progenitor Cells", "DG-PIR Immature Neurons", "Dentate Gyrus Neurons", "CTX-CGE GABA",
+                        "Immature GABA Neurons","VIP GABA Neurons", "Lamp5 GABA Neurons", "Pvalb GABA Neurons", "Sst GABA Neurons",                                        "NP CT L6b Glut","IT-ET Glut Neurons", "SUB-ProS Glut Neurons", "HPF CR Glut Neurons", "CA3 Glut Neurons",
+                        "CA2 Glut Neurons", "CA1 Glut Neurons","HPF CR Glut Neurons")
+KA_seurat_filtered <- subset(KA_seurat_filtered,subset= classes %in% classes_filtering)
+KA_seurat_filtered@meta.data$classes <- droplevels(KA_seurat_filtered@meta.data$classes)
+# 
+DimPlot(KA_seurat_filtered,group.by = "DoubletFinder")
+ggsave("KA_seurat_filtered_DoubletFinder_prerunUMAP_UMAP.jpg", plot =DimPlot(KA_seurat_filtered,group.by = "DoubletFinder"),width = 10, height=10,dpi=300)
+
+KA_seurat_filtered <- SCTransform(KA_seurat_filtered,verbose=F)
+KA_seurat_filtered <- RunPCA(KA_seurat_filtered, features = VariableFeatures(object = KA_seurat_filtered))
+KA_seurat_filtered <- FindNeighbors(KA_seurat_filtered, dims = 1:20)
+KA_seurat_filtered <- FindClusters(KA_seurat_filtered, resolution = 1)
+KA_seurat_filtered <- RunTSNE(KA_seurat_filtered, dims = 1:20)
+KA_seurat_filtered <- RunUMAP(KA_seurat_filtered, dims = 1:20)
+
+KA_seurat_filtered[["percent.mt"]] <- PercentageFeatureSet(KA_seurat_filtered, pattern = "^mt-")
+ 
+
+
+saveRDS(KA_seurat_filtered,"KA_seurat_filtering.rds")
+# 
+DimPlot(KA_seurat_filtered,label=T)
+ggsave("KA_seurat_filtered_clusters_UMAP.jpg", plot =DimPlot(KA_seurat_filtered,label=T),width = 10, height=10,dpi=300)
+
+DimPlot(KA_seurat_filtered,group.by = "DoubletFinder")
+ggsave("KA_seurat_filtered_DoubletFinder_UMAP.jpg", plot =DimPlot(KA_seurat_filtered,group.by = "DoubletFinder"),width = 10, height=10,dpi=300)
+
+DimPlot(KA_seurat_filtered,group.by = "sample.origin")
+ggsave("KA_seurat_filtered_sampleOrigin_UMAP.jpg", plot =DimPlot(KA_seurat_filtered,group.by = "sample.origin"),width = 10, height=10,dpi=300)
+
+DimPlot(KA_seurat_filtered,group.by = "condition")
+ggsave("KA_seurat_filtered_condition_UMAP.jpg", plot =DimPlot(KA_seurat_filtered,group.by = "condition"),width = 10, height=10,dpi=300)
+
+FeaturePlot(KA_seurat_filtered,features = "percent.mt")
+ggsave("KA_seurat_filtered_percentmt_UMAP.jpg", plot =FeaturePlot(KA_seurat_filtered,features = "percent.mt"),width = 10, height=10,dpi=300)
+
+cluster_markers_filtered <- FindAllMarkers(KA_seurat_filtered)
+write.csv(cluster_markers_filtered, file = "KA_seurat_prefiltered_allmarkers.csv", row.names = TRUE)
+
+
+
+```

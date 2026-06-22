@@ -1,0 +1,329 @@
+---
+title: "IAKA_cellchat"
+author: "Javier Villegas"
+date: "2025-12-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(Seurat)
+library(CellChat)
+library(patchwork) 
+
+options(future.globals.maxSize = 8000 * 1024^2) 
+options(stringsAsFactors = FALSE) 
+```
+
+
+```{r Run cellchat for control samples}
+
+
+KA_seurat <- subset(KA_seurat_plots,subset= condition=="Control")
+
+classes_filtering<-list("Choroid Plexus", "Vascular cells", "Microglia", "Astrocytes", "Oligodendrocytes",
+                        "Oligo Progenitor Cells", "DG-PIR Immature Neurons", "Dentate Gyrus Neurons", "CTX-CGE GABA",
+                        "Immature GABA Neurons", "VIP GABA Neurons", "Lamp5 GABA Neurons", "Pvalb GABA Neurons", "Sst GABA Neurons",                                        "NP CT L6b Glut","IT-ET Glut Neurons", "SUB-ProS Glut Neurons", "HPF CR Glut Neurons", "CA3 Glut Neurons",
+                        "CA2 Glut Neurons", "CA1 Glut Neurons")
+KA_seurat <- subset(KA_seurat,subset= classes %in% classes_filtering)
+KA_seurat@meta.data$classes <- droplevels(KA_seurat@meta.data$classes)
+
+data.input <- GetAssayData(KA_seurat, assay = "RNA", slot = "counts") 
+data.input <- CellChat::normalizeData(data.input) 
+
+Idents(KA_seurat)<- KA_seurat$classes
+labels <- Idents(KA_seurat) 
+
+meta <- data.frame(labels = labels, row.names = names(labels)) 
+
+
+meta <- data.frame(
+  labels = KA_seurat$classes,
+  samples = as.character(droplevels(KA_seurat$sample.origin))
+)
+rownames(meta) <- colnames(KA_seurat)
+
+
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels") 
+  
+#We select the database relevant to our project
+CellChatDB <- CellChatDB.mouse 
+
+
+CellChatDB.use <- CellChatDB 
+
+  
+
+# set the used database in the object 
+
+cellchat@DB <- CellChatDB.use 
+
+
+cellchat <- subsetData(cellchat) 
+
+future::plan("multisession", workers = 8) # do parallel 
+
+cellchat <- identifyOverExpressedGenes(cellchat) 
+
+cellchat <- identifyOverExpressedInteractions(cellchat) 
+
+
+  
+execution.time = Sys.time() - ptm 
+print(as.numeric(execution.time, units = "secs")) #check how long it takes
+
+
+
+
+  
+ptm = Sys.time() 
+
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean",trim = 0.1) #more relaxed method
+
+cellchat <- filterCommunication(cellchat, min.cells = 10)
+
+
+df.net <- subsetCommunication(cellchat) 
+
+  
+
+cellchat <- computeCommunProbPathway(cellchat) 
+  
+  
+
+cellchat <- aggregateNet(cellchat) 
+
+execution.time = Sys.time() - ptm 
+
+print(as.numeric(execution.time, units = "secs")) 
+
+
+
+# netVisual_aggregate(cellchat, signaling = , layout = "chord") 
+saveRDS(cellchat,"./cellchat_Control_trimean_01.rds")
+
+
+``` 
+
+
+```{r Run cellchat for epi samples}
+
+
+
+ptm = Sys.time() 
+
+KA_seurat <- subset(KA_seurat_plots,subset= condition=="Epi")
+
+classes_filtering<-list("Choroid Plexus", "Vascular cells", "Microglia", "Astrocytes", "Oligodendrocytes",
+                        "Oligo Progenitor Cells", "DG-PIR Immature Neurons", "Dentate Gyrus Neurons", "CTX-CGE GABA",
+                        "Immature GABA Neurons", "VIP GABA Neurons", "Lamp5 GABA Neurons", "Pvalb GABA Neurons", "Sst GABA Neurons",                                        "NP CT L6b Glut","IT-ET Glut Neurons", "SUB-ProS Glut Neurons", "HPF CR Glut Neurons", "CA3 Glut Neurons",
+                        "CA2 Glut Neurons", "CA1 Glut Neurons")
+KA_seurat <- subset(KA_seurat,subset= classes %in% classes_filtering)
+KA_seurat@meta.data$classes <- droplevels(KA_seurat@meta.data$classes)
+
+
+data.input <- GetAssayData(KA_seurat, assay = "RNA", slot = "counts") 
+data.input <- CellChat::normalizeData(data.input) 
+
+Idents(KA_seurat)<- KA_seurat$classes
+labels <- Idents(KA_seurat) 
+
+meta <- data.frame(labels = labels, row.names = names(labels)) 
+
+
+meta <- data.frame(
+  labels = KA_seurat$classes,
+  samples = as.character(droplevels(KA_seurat$sample.origin))
+)
+rownames(meta) <- colnames(KA_seurat)
+  
+
+  
+
+cellchat <- createCellChat(object = data.input, meta = meta, group.by = "labels") 
+
+  
+
+  
+
+CellChatDB <- CellChatDB.mouse 
+
+CellChatDB.use <- CellChatDB 
+
+  
+
+cellchat@DB <- CellChatDB.use 
+
+  
+
+
+cellchat <- subsetData(cellchat) 
+
+cellchat <- identifyOverExpressedGenes(cellchat) 
+
+cellchat <- identifyOverExpressedInteractions(cellchat) 
+
+
+  
+
+execution.time = Sys.time() - ptm 
+
+print(as.numeric(execution.time, units = "secs")) 
+
+
+
+
+ptm = Sys.time() 
+
+cellchat <- computeCommunProb(cellchat, type = "truncatedMean",trim = 0.1) #more relaxed method
+
+  
+cellchat <- filterCommunication(cellchat, min.cells = 10) 
+
+  
+
+
+df.net <- subsetCommunication(cellchat) 
+
+  
+
+cellchat <- computeCommunProbPathway(cellchat) 
+
+  
+
+cellchat <- aggregateNet(cellchat) 
+
+execution.time = Sys.time() - ptm 
+
+print(as.numeric(execution.time, units = "secs")) 
+
+saveRDS(cellchat,"./cellchat_Epi_trimean_01.rds")
+
+
+``` 
+
+```{r Comparison analysis of epi/control datasets}
+
+ptm = Sys.time()
+library(CellChat)
+library(patchwork)
+
+
+data.dir <- './comparison'
+dir.create(data.dir)
+setwd(data.dir)
+
+###Read objects first
+object.list <- list(PBS = cellchat.PBS, KA = cellchat.KA)
+cellchat <- mergeCellChat(object.list, add.names = names(object.list))
+
+saveRDS(cellchat,"./cellchat_comp.rds")
+###############
+##Circle plot showing differential number of interactions or interaction strength among different cell populations across two datasets
+
+par(mfrow = c(1,2), xpd=TRUE)
+netVisual_diffInteraction(cellchat, weight.scale = T)
+netVisual_diffInteraction(cellchat, weight.scale = T, measure = "weight")
+
+
+##Heatmap showing differential number of interactions or interaction strength among different cell populations across two datasets
+gg1 <- netVisual_heatmap(cellchat)
+#> Do heatmap based on a merged object
+gg2 <- netVisual_heatmap(cellchat, measure = "weight")
+#> Do heatmap based on a merged object
+gg1 + gg2
+
+
+rankNet(cellchat,mode = "comparison",stacked = T,do.stat = T)
+
+##Compare outgoing/incoming interaction strength for all the cell types 
+# count.sum <- sapply(object.list, function(x) {rowSums(x@net$count) +
+#     colSums(x@net$counts)-diag(x@net$count)})
+
+##Identify cell populations with significant changes in sending or receiving signals
+num.link <- sapply(object.list, function(x) {rowSums(x@net$count) + 
+    colSums(x@net$count)-diag(x@net$count)})
+weight.MinMax <- c(min(num.link), max(num.link)) # control the dot size in the different datasets
+gg <- list()
+for (i in 1:length(object.list)) {
+  gg[[i]] <- netAnalysis_signalingRole_scatter(object.list[[i]], title = names(object.list)[i], weight.MinMax = weight.MinMax)
+}
+#> Signaling role analysis on the aggregated cell-cell communication network from all signaling pathways
+#> Signaling role analysis on the aggregated cell-cell communication network from all signaling pathways
+patchwork::wrap_plots(plots = gg)
+
+#Identify signalling changes associated with one cell group
+netAnalysis_signalingChanges_scatter(cellchat,idents.use = "Sst Gaba Neurons")
+netAnalysis_signalingChanges_scatter(cellchat,idents.use = "CA1-ProS Glut",signaling.exclude = "ADGRL")
+
+
+
+##
+pathways.show <- c("Glutamate") 
+weight.max <- getMaxWeight(object.list, slot.name = c("netP"), attribute = pathways.show) # control the edge weights across different datasets
+par(mfrow = c(1,2), xpd=TRUE)
+for (i in 1:length(object.list)) {
+  netVisual_aggregate(object.list[[i]], signaling = pathways.show, layout = "circle", edge.weight.max = weight.max[1], edge.width.max = 10, signaling.name = paste(pathways.show, names(object.list)[i]))
+}
+
+
+
+pathways.show <- c("SEMA3") 
+par(mfrow = c(1,2), xpd=TRUE)
+ht <- list()
+for (i in 1:length(object.list)) {
+  ht[[i]] <- netVisual_heatmap(object.list[[i]], signaling = pathways.show, color.heatmap = "Reds",title.name = paste(pathways.show, "signaling ",names(object.list)[i]))
+}
+#> Do heatmap based on a single object 
+#> 
+#> Do heatmap based on a single object
+ComplexHeatmap::draw(ht[[1]] + ht[[2]], ht_gap = unit(0.5, "cm"))
+
+
+i = 1
+# combining all the identified signaling pathways from different datasets 
+pathway.union <- union(object.list[[i]]@netP$pathways, object.list[[i+1]]@netP$pathways)
+ht1 = netAnalysis_signalingRole_heatmap(object.list[[i]], pattern = "incoming", signaling = pathway.union, title = names(object.list)[i], width = 5, height = 22)
+ht2 = netAnalysis_signalingRole_heatmap(object.list[[i+1]], pattern = "incoming", signaling = pathway.union, title = names(object.list)[i+1], width = 5, height = 22)
+draw(ht1 + ht2, ht_gap = unit(7, "cm"))
+
+###########################
+# define a positive dataset, i.e., the dataset with positive fold change against the other dataset
+pos.dataset = "KA"
+# define a char name used for storing the results of differential expression analysis
+features.name = paste0(pos.dataset, ".merged")
+
+# perform differential expression analysis 
+# Of note, compared to CellChat version < v2, CellChat v2 now performs an ultra-fast Wilcoxon test using the presto package, which gives smaller values of logFC. Thus we here set a smaller value of thresh.fc compared to the original one (thresh.fc = 0.1). Users can also provide a vector and dataframe of customized DEGs by modifying the cellchat@var.features$LS.merged and cellchat@var.features$LS.merged.info. 
+
+cellchat <- identifyOverExpressedGenes(cellchat, group.dataset = "datasets", pos.dataset = pos.dataset, features.name = features.name, only.pos = FALSE, thresh.pc = 0.1, thresh.fc = 0.05,thresh.p = 0.05, group.DE.combined = FALSE) 
+#> Use the joint cell labels from the merged CellChat object
+
+# map the results of differential expression analysis onto the inferred cell-cell communications to easily manage/subset the ligand-receptor pairs of interest
+net <- netMappingDEG(cellchat, features.name = features.name, variable.all = TRUE)
+# extract the ligand-receptor pairs with upregulated ligands in LS
+net.up <- subsetCommunication(cellchat, net = net, datasets = "KA",ligand.logFC = 0.05, receptor.logFC = NULL)
+# extract the ligand-receptor pairs with upregulated ligands and upregulated receptors in NL, i.e.,downregulated in LS
+net.down <- subsetCommunication(cellchat, net = net, datasets = "KA",ligand.logFC = -0.05, receptor.logFC = NULL)
+
+# Since the signaling genes in the net.up and net.down might be complex with multi-subunits, we can do further deconvolution to obtain the individual signaling genes.
+
+gene.up <- extractGeneSubsetFromPair(net.up, cellchat)
+gene.down <- extractGeneSubsetFromPair(net.down, cellchat)
+
+# We then visualize the upgulated and down-regulated signaling ligand-receptor pairs using bubble plot or chord diagram.
+
+pairLR.use.up = net.up[, "interaction_name", drop = F]
+gg1 <- netVisual_bubble(cellchat, pairLR.use = pairLR.use.up, sources.use = 4, targets.use = c(5:11), comparison = c(1, 2),  angle.x = 90, remove.isolate = T,title.name = paste0("Up-regulated signaling in ", names(object.list)[2]))
+#> Comparing communications on a merged object
+pairLR.use.down = net.down[, "interaction_name", drop = F]
+gg2 <- netVisual_bubble(cellchat, pairLR.use = pairLR.use.down, sources.use = 4, targets.use = c(5:11), comparison = c(1, 2),  angle.x = 90, remove.isolate = T,title.name = paste0("Down-regulated signaling in ", names(object.list)[2]))
+#> Comparing communications on a merged object
+gg1 + gg2
+
+# We can plot the gene expression distribution of signaling genes related to L-R pairs or signaling pathway using a Seurat wrapper function plotGeneExpression.
+
+cellchat@meta$datasets = factor(cellchat@meta$datasets, levels = c("PBS", "KA")) # set factor level
+plotGeneExpression(cellchat, signaling = "Glutamate", split.by = "datasets", colors.ggplot = T, type = "violin")
+```
