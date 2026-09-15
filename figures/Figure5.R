@@ -164,7 +164,7 @@ fig_5c
 genes <- c("Gpam","Fdtd1","Cyp51","Idi1","Hmgcs1")
 get_counts_for_gene <- function(g) {
   df <- plotCounts(
-    dds_classes_pseudo_list[["Dentate Gyrus Neurons"]],
+    dds_classes_pseudo_list[["Astrocytes"]],
     gene       = g,
     intgroup   = "group",   # assumes 'group' has Control / Epi
     returnData = TRUE
@@ -198,8 +198,8 @@ ggplot(pc, aes(x = gene, y = count, fill = group)) +
   scale_y_continuous(limits = c(0, NA)) +
   scale_fill_brewer(palette = "Set2") +
   labs(
-    title = "Expression of the latrophilin ligans",
-    subtitle= "In Dentate Gyrus neurons",
+    title = "Expression of Cholesterol biosynthesis genes",
+    subtitle= "In Astrocytes",
     x = "Gene",
     y = "Normalized count",
     fill = "Group"
@@ -213,7 +213,7 @@ ggplot(pc, aes(x = gene, y = count, fill = group)) +
 genes <- c("Ank3","Chl1","Dnm3","Itga5","Nrp2")
 get_counts_for_gene <- function(g) {
   df <- plotCounts(
-    dds_classes_pseudo_list[["Dentate Gyrus Neurons"]],
+    dds_classes_pseudo_list[["Astrocytes"]],
     gene       = g,
     intgroup   = "group",
     returnData = TRUE
@@ -247,8 +247,8 @@ ggplot(pc, aes(x = gene, y = count, fill = group)) +
   scale_y_continuous(limits = c(0, NA)) +
   scale_fill_brewer(palette = "Set2") +
   labs(
-    title = "Expression of the latrophilin ligans",
-    subtitle= "In Dentate Gyrus neurons",
+    title = "Expression of L1cam interaction genes",
+    subtitle= "In Astrocytes",
     x = "Gene",
     y = "Normalized count",
     fill = "Group"
