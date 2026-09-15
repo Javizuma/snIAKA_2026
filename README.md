@@ -1,4 +1,13 @@
 # snIAKA_2026
-This repository contains code for the analysis of single-nucleus RNA-seq data from the mouse intra-amygdala kainic acid (IAKA) model of temporal lobe epilepsy. 
 
-Folders contain necessary scripts for preprocessing, cell type annotation, differential expression (single-cell and pseudobulk), pathway enrichment (IPA), and cell–cell communication analysis (CellChat).
+This repository contains code used for the analysis of single-nucleus RNA-seq data from the mouse intra-amygdala kainic acid (IAKA) model of temporal lobe epilepsy.
+
+The folders contain scripts for preprocessing, cell-type annotation, differential expression analysis (single-cell and pseudobulk), pathway enrichment analysis, and cell–cell communication analysis using CellChat.
+
+## Publication
+
+Villegas Salmerón J. et al. (2026).  
+**Single-nucleus transcriptomic analysis reveals subfield-specific cell-to-cell synaptic reorganisation of the mouse hippocampus in focal temporal lobe epilepsy.**  
+*Journal of Translational Medicine.*
+
+https://doi.org/10.1186/s12967-026-08978-2
