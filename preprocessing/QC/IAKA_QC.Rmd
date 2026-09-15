@@ -44,15 +44,40 @@ PBS1_SO <-CreateSeuratObject(counts = PBS1)
 PBS2_SO <-CreateSeuratObject(counts = PBS2)
 PBS3_SO <-CreateSeuratObject(counts = PBS3)
 PBS4_SO <-CreateSeuratObject(counts = PBS4)
+# Merge Seurat objects
+KA_seurat <- merge(
+  KA1_SO,
+  y = c(KA2_SO, KA3_SO, KA4_SO, PBS1_SO, PBS2_SO, PBS3_SO, PBS4_SO),
+  add.cell.ids = c(
+    "Epi1", "Epi2", "Epi3", "Epi4",
+    "Control1", "Control2", "Control3", "Control4"
+  ),
+  project = "NOV2024_KA",
+  merge.data = TRUE
+)
 
-# #Merge seurat objects
-KA_seurat <- merge(KA1_SO,y=c(KA2_SO,KA3_SO,KA4_SO,PBS1_SO,PBS2_SO,PBS3_SO,PBS4_SO),add.cell.ids=c("EPI1","EPI2","EPI3","EPI4","Control1","Control2","Control3","Control4"),project="NOV2024_KA",merge.data=T)
 KA_seurat[["RNA"]] <- JoinLayers(KA_seurat[["RNA"]])
-#Add a column on the metadata that reflects sample of origin for each cell
-KA_seurat[["sample.origin"]] <- sapply(X = strsplit(colnames(KA_seurat), split = "_"), FUN = "[", 1)
+
+# Add sample of origin from cell barcode prefix
+KA_seurat[["sample.origin"]] <- sapply(
+  strsplit(colnames(KA_seurat), split = "_"),
+  FUN = "[",
+  1
+)
+
 Idents(KA_seurat) <- KA_seurat$sample.origin
-KA_seurat$condition <- ifelse(test = KA_seurat$sample.origin %in% c("EPI1","EPI2","EPI3","EPI4"), yes = "KA", no = "PBS")
-KA_seurat[["percent.mt"]] <- PercentageFeatureSet(KA_seurat, pattern = "^mt-")
+
+# Add experimental condition
+KA_seurat$condition <- ifelse(
+  KA_seurat$sample.origin %in% c("Epi1", "Epi2", "Epi3", "Epi4"),
+  "Epi",
+  "Control"
+)
+
+KA_seurat[["percent.mt"]] <- PercentageFeatureSet(
+  KA_seurat,
+  pattern = "^mt-"
+)
 
 # Visualize QC metrics as a violin plot
 VlnPlot(KA_seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
