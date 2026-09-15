@@ -26,9 +26,11 @@ Some downstream scripts use objects generated in previous steps.
 
 Expected doublet rates used during preprocessing were based on the corresponding 10x Genomics documentation.
 
+Smaller MapMyCells subclasses were grouped into broader parent classes to obtain the cell subtype categories used for downstream analyses.
+
 Cell-type annotation includes an external [MapMyCells](https://knowledge.brain-map.org/mapmycells/process) step. The annotation script generates an `.h5ad` file for upload to MapMyCells, and the resulting annotation file is then imported back into R before continuing with downstream analyses.
 
-Smaller MapMyCells subclasses were grouped into broader parent classes to obtain the cell subtype categories used for downstream analyses.
+Pathway enrichment analysis was performed using Ingenuity Pathway Analysis (IPA; QIAGEN). As this analysis was carried out within the IPA software, no standalone R script is included in this repository. The pathway enrichment outputs used in the manuscript are provided in the supplementary files associated with the publication.
 
 ## Sample naming
 
@@ -39,7 +41,7 @@ Sample identifiers in the GEO/raw data correspond to the following analysis labe
 
 These refer to the same biological samples; only the naming convention differs between the raw data and some downstream analysis scripts.
 
-##  Software environment
+## Software environment
 
 Analyses were performed in R. The main packages and versions used are listed in package_versions.txt. R packages required for each analysis are listed at the beginning of the corresponding scripts. Packages can be installed from CRAN, Bioconductor, or their respective GitHub repositories, as appropriate. Please refer to the package documentation for installation instructions and version requirements.
 
