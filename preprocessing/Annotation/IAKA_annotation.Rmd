@@ -6,592 +6,359 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+# Load libraries
 library(Seurat)
 library(tidyverse)
-
+library(reticulate)
+library(anndata)
 ```
 
-```{r Using MapMyCells}
-# 
-# ###Filtered dataset
-KA_seurat_filtered <- readRDS("/media/javi/dat3/JAVI/IAKA_Nov_24/output/RDS_files/Filtering /KA_seurat_filtering.rds")
-#Functions needed for creating the anndata format (if it doesn't work, re-start R to open the python environment)
-library(reticulate)
-version <- "3.9.12"
-install_python(version)
-virtualenv_create("my-environment", version = version)
+# MapMyCells annotation
+
+## 1. Generate input file for MapMyCells
+
+```{r mapmycells_input}
+
+# Filtered Seurat object generated in the previous preprocessing script
+KA_seurat_filtered <- readRDS("Filtering/KA_seurat_filtering.rds")
+
+# Python environment used by anndata
+# Run these lines once if the environment has not already been created:
+#
+# version <- "3.9.12"
+# install_python(version)
+# virtualenv_create("my-environment", version = version)
+
 use_virtualenv("my-environment")
 
-
-# Transpose data
-dataQCt = Matrix::t(as.matrix(Seurat::GetAssayData(KA_seurat_filtered,layer = "counts",assay = "RNA")))
-
-library(anndata)
-# Convert to anndata format
-ad <- AnnData(
-  X = dataQCt,
-  obs = data.frame(group = rownames(dataQCt), row.names = rownames(dataQCt)),
-  var = data.frame(type = colnames(dataQCt), row.names = colnames(dataQCt))
+# Extract raw counts and transpose to cells x genes
+dataQCt <- Matrix::t(
+  as.matrix(
+    GetAssayData(
+      KA_seurat_filtered,
+      assay = "RNA",
+      layer = "counts"
+    )
+  )
 )
 
-# Write to compressed h5ad file
-write_h5ad(ad,'IAKA_seurat_17_01_2025.h5ad',compression='gzip')
+# Convert to AnnData
+ad <- AnnData(
+  X = dataQCt,
+  obs = data.frame(
+    group = rownames(dataQCt),
+    row.names = rownames(dataQCt)
+  ),
+  var = data.frame(
+    type = colnames(dataQCt),
+    row.names = colnames(dataQCt)
+  )
+)
 
+# Save compressed h5ad file
+write_h5ad(
+  ad,
+  "IAKA_seurat_MapMyCells.h5ad",
+  compression = "gzip"
+)
 
-# Check file size. File MUST be <500MB to upload for MapMyCells
-print(paste("Size in MB:",round(file.size("IAKA_seurat_17_01_2025.h5ad")/2^20)))
-
-
+# Check file size
+print(
+  paste(
+    "Size in MB:",
+    round(file.size("IAKA_seurat_MapMyCells.h5ad") / 2^20)
+  )
+)
 ```
 
+## 2. Run MapMyCells
 
-```{r Adding annotations}
+The generated `.h5ad` file was uploaded manually to **MapMyCells** using the
+10x Whole Mouse Brain taxonomy. The resulting hierarchical mapping `.csv`
+file was downloaded and used below.
 
-# #Read MapMyCells output for KA_seurat_filtered
-mapping <- read.csv("MMC_output/IAKA_seurat_17_01_2025_10xWholeMouseBrain(CCN20230722)_HierarchicalMapping_UTC_1737110705119.csv",comment.char="#")
-head(data.frame(mapping))
-# View the top 8 classes
-data.frame(Cell_counts=head(sort(table(mapping$subclass_name),decreasing=T),200))
+## 3. Add MapMyCells annotations
 
-# What fraction of all cells does these 8 classes represent?
-sum(t(t(head(sort(table(mapping$subclass_name),decreasing=T),20))))/length(mapping$subclass_name)
+```{r import_mapmycells}
 
-# Assign rare classes and subclasses as "other"
-mapping$class_new <- mapping$class_name
-mapping$class_new[!is.element(mapping$class_name,names(head(-sort(-table(mapping$class_name)),10)))] = "Gaba neurons"
-mapping$subclass_new <- mapping$subclass_name
-mapping$subclass_new[!is.element(mapping$subclass_name,names(head(-sort(-table(mapping$subclass_name)),30)))] = "other"
+# Read MapMyCells output
+mapping <- read.csv(
+  "MMC_output/IAKA_seurat_MapMyCells_HierarchicalMapping.csv",
+  comment.char = "#"
+)
 
-KA_seurat<- AddMetaData(KA_seurat,metadata =mapping)
-# KA_seurat <- readRDS("KA_seurat_filtered_annotated.rds")
+# MapMyCells output should contain one row per nucleus
+stopifnot(nrow(mapping) == ncol(KA_seurat_filtered))
 
-DimPlot(KA_seurat,group.by = "class_new")
-ggsave("KA_seurat_filtered_types_UMAP.jpg", plot =DimPlot(KA_seurat,group.by = "class_new",label = T),width = 15, height=10,dpi=300)
+# Match annotation rows to nuclei in the Seurat object
+rownames(mapping) <- colnames(KA_seurat_filtered)
 
-DimPlot(KA_seurat,group.by = "subclass_new")
-ggsave("KA_seurat_filtered_subtypes_UMAP.jpg", plot =DimPlot(KA_seurat,group.by = "subclass_new",label = T),width = 15, height=10,dpi=300)
-# KA_seurat <- RunUMAP(KA_seurat, dims = 1:10)
+# Add MapMyCells annotation to Seurat metadata
+KA_seurat_filtered <- AddMetaData(
+  KA_seurat_filtered,
+  metadata = mapping
+)
 
-saveRDS(srat_new_MMC,"KA_seurat_annotated_17_01_2025.rds")
+# Check annotations
+table(KA_seurat_filtered$class_name)
+table(KA_seurat_filtered$subclass_name)
 
+# Plot original MapMyCells annotations
+DimPlot(
+  KA_seurat_filtered,
+  group.by = "class_name",
+  label = TRUE,
+  repel = TRUE
+) + NoLegend()
+
+DimPlot(
+  KA_seurat_filtered,
+  group.by = "subclass_name",
+  label = TRUE,
+  repel=TRUE
+) + NoLegend()
 ```
 
+# Rename MapMyCells annotations
+
+The original MapMyCells subclasses were grouped into the cell classes used
+for downstream analyses.
+
+```{r rename_annotations}
+
+# Rename / merge MapMyCells annotations
+# Smaller MapMyCells subclasses were grouped into broader parent classes to obtain the cell subtype categories used for downstream analyses.
+
+# Helper function to create a lookup table
+make_lookup <- function(groups) {
+
+  unlist(
+    lapply(names(groups), function(group) {
+
+      setNames(
+        rep(group, length(groups[[group]])),
+        groups[[group]]
+      )
+
+    })
+  )
+}
 
 
-##Steps after using MapMyCells
-```{r}
-##We add the result to the srat object MMC=MapMyCells
-  # srat_new_MMC <- SCTransform(srat_new_MMC,verbose=F)
-  # srat_new_MMC <- RunPCA(srat_new_MMC, features = VariableFeatures(object = srat_new_MMC))
-  # srat_new_MMC <- FindNeighbors(srat_new_MMC, dims = 1:20)
-  # srat_new_MMC <- FindClusters(srat_new_MMC, resolution = 1)
-  # srat_new_MMC <- RunUMAP(srat_new_MMC, dims = 1:20)
+########################################################
+# Neuronal classes
 
-srat_new_MMC <- KA_seurat
-#Plotting types annotation
-DimPlot(srat_new_MMC, reduction = "umap", group.by="class_new", label=TRUE) + NoLegend()
+class_groups <- list(
+
+  "CA1 Glut Neurons" = c(
+    "016 CA1-ProS Glut"
+  ),
+
+  "CA2 Glut Neurons" = c(
+    "025 CA2-FC-IG Glut"
+  ),
+
+  "CA3 Glut Neurons" = c(
+    "017 CA3 Glut"
+  ),
+
+  "HPF CR Glut Neurons" = c(
+    "036 HPF CR Glut"
+  ),
+
+  "SUB-ProS Glut Neurons" = c(
+    "023 SUB-ProS Glut"
+  ),
+
+  "Dentate Gyrus Neurons" = c(
+    "037 DG Glut"
+  ),
+
+  "DG-PIR Immature Neurons" = c(
+    "038 DG-PIR Ex IMN"
+  ),
+
+  "IT-ET Glut Neurons" = c(
+    "008 L2/3 IT ENT Glut",
+    "019 L2/3 IT PPP Glut",
+    "018 L2 IT PPP-APr Glut",
+    "011 L2 IT ENT-po Glut",
+    "003 L5/6 IT TPE-ENT Glut",
+    "020 L2/3 IT RSP Glut",
+    "007 L2/3 IT CTX Glut",
+    "009 L2/3 IT PIR-ENTl Glut",
+    "015 ENTmv-PA-COAp Glut",
+    "006 L4/5 IT CTX Glut",
+    "030 L6 CT CTX Glut",
+    "022 L5 ET CTX Glut",
+    "004 L6 IT CTX Glut",
+    "024 L5 PPP Glut",
+    "005 L5 IT CTX Glut",
+    "021 L4 RSP-ACA Glut",
+    "002 IT EP-CLA Glut",
+    "012 MEA Slc17a7 Glut",
+    "014 LA-BLA-BMA-PA Glut",
+    "001 CLA-EPd-CTX Car3 Glut",
+    "010 IT AON-TT-DP Glut",
+    "013 COAp Grxcr2 Glut"
+  ),
+
+  "NP CT L6b Glut" = c(
+    "028 L6b/CT ENT Glut",
+    "029 L6b CTX Glut",
+    "031 CT SUB Glut",
+    "033 NP SUB Glut",
+    "034 NP PPP Glut",
+    "027 L6b EPd Glut",
+    "032 L5 NP CTX Glut"
+  ),
+
+  "Sst GABA Neurons" = c(
+    "056 Sst Chodl Gaba",
+    "053 Sst Gaba"
+  ),
+
+  "Pvalb GABA Neurons" = c(
+    "051 Pvalb chandelier Gaba",
+    "052 Pvalb Gaba"
+  ),
+
+  "Lamp5 GABA Neurons" = c(
+    "049 Lamp5 Gaba",
+    "050 Lamp5 Lhx6 Gaba"
+  ),
+
+  "VIP GABA Neurons" = c(
+    "046 Vip Gaba"
+  ),
+
+  "Immature GABA Neurons" = c(
+    "045 OB-STR-CTX Inh IMN",
+    "041 OB-in Frmd7 Gaba",
+    "044 OB Dopa-Gaba",
+    "039 OB Meis2 Thsd7b Gaba",
+    "042 OB-out Frmd7 Gaba"
+  ),
+
+  "CTX-CGE GABA" = c(
+    "048 RHP-COA Ndnf Gaba",
+    "047 Sncg Gaba"
+  ),
 
 
-#Plotting subtypes annotation
-DimPlot(srat_new_MMC, reduction = "umap", group.by="subclass_new", label=TRUE) + NoLegend()
+########################################################
+# Non-neuronal classes
+
+  "Oligo Progenitor Cells" = c(
+    "326 OPC NN"
+  ),
+
+  "Oligodendrocytes" = c(
+    "327 Oligo NN"
+  ),
+
+  "Astrocytes" = c(
+    "318 Astro-NT NN",
+    "319 Astro-TE NN"
+  ),
+
+  "Microglia" = c(
+    "334 Microglia NN"
+  ),
+
+  "Vascular cells" = c(
+    "333 Endo NN",
+    "331 Peri NN",
+    "329 ABC NN",
+    "332 SMC NN",
+    "335 BAM NN",
+    "321 Astroependymal NN",
+    "322 Tanycyte NN",
+    "323 Ependymal NN",
+    "338 Lymphoid NN",
+    "337 DC NN",
+    "330 VLMC NN"
+  ),
+
+  "Choroid Plexus" = c(
+    "325 CHOR NN"
+  )
+)
 
 
-##We rename the subtypes to get a clearer understanding
-Idents(srat_new_MMC) <- srat_new_MMC$subclass_new
+# Convert MapMyCells subclass names to the classes used in the analysis
+class_lookup <- make_lookup(class_groups)
 
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "053 Sst Gaba"),value="Sst Gaba")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "016 CA1-ProS Glut"),value="CA1-ProS Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "334 Microglia NN"),value="Microglia")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "327 Oligo NN"),value="Oligodendrocytes")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "037 DG Glut"),value="Dentate Gyrus Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "325 CHOR NN"),value="Choroid Plexus")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "017 CA3 Glut"),value="CA3 Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "319 Astro-TE NN"),value="Astrocytes")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "033 NP SUB Glut"),value="NP SUB Glut")
-# srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "other"),value="Gaba Neurons")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "023 SUB-ProS Glut"),value="SUB-ProS Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "326 OPC NN"),value="Oligodendrocyte progenitors")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "330 VLMC NN"),value="Vascular cells")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "031 CT SUB Glut"),value="CT SUB Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "052 Pvalb Gaba"),value="Pvalb Gaba")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "050 Lamp5 Lhx6 Gaba"),value="Lamp5 Lhx6 Gaba")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "019 L2/3 IT PPP Glut"),value="L2-3 IT PPP Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "333 Endo NN"),value="Endothelial cells")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "028 L6b/CT ENT Glut"),value="L6b-CT ENT Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "018 L2 IT PPP-APr Glut"),value="L2 IT PPP-Apr Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "008 L2/3 IT ENT Glut"),value="L2-3 IT ENT Glut")
+KA_seurat_filtered$classes <- unname(
+  class_lookup[KA_seurat_filtered$subclass_name]
+)
 
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "038 DG-PIR Ex IMN"),value="DG-PIR Ex IMN")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "046 Vip Gaba"),value="Vip Gaba")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "025 CA2-FC-IG Glut"),value="CA2-FC-IG Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "048 RHP-COA Ndnf Gaba"),value="RHP-COA Ndnf Gaba")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "331 Peri NN"),value="Peri NN")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "049 Lamp5 Gaba"),value="Lamp5 Gaba")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "329 ABC NN"),value="ABC NN")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "036 HPF CR Glut"),value="HPF CR Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "003 L5/6 IT TPE-ENT Glut"),value="L5-6 IT TPE-ENT Glut")
+# Subclasses not used in downstream analyses are labelled as Other
+KA_seurat_filtered$classes[
+  is.na(KA_seurat_filtered$classes)
+] <- "Other"
 
+KA_seurat_filtered$classes <- factor(
+  KA_seurat_filtered$classes
+)
 
-srat_new_MMC$subtypes <- Idents(srat_new_MMC)
+# Check final annotation
+table(KA_seurat_filtered$classes)
 
-
-##Find what genes differentiate each subtype 
-
-Idents(srat_new_MMC) <- srat_new_MMC$subtypes
-subtype_markers <- FindAllMarkers(srat_new_MMC)
-
-##cell type composition to check how many cells fall in each subtype category
-tab1_subtypes <- srat_new_MMC@meta.data %>% group_by(sample.origin,subclasses) %>% tally()
-tab1_subtypes
-
-tab2_subtypes <- tab1_subtypes %>% spread(key=subclasses,value=n)
-tab2_subtypes
-
-tab3_subtypes <- tab1_subtypes %>% group_by(sample.origin) %>% mutate(n/sum(n)) %>% spread(key=subtypes,value=n)
-tab3_subtypes
-
-
-##We rename types level to a clearer annotation
-Idents(srat_new_MMC) <- srat_new_MMC$class_new
-
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "01 IT-ET Glut"),value="IT-ET Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "02 NP-CT-L6b Glut"),value="NP CT L6b Glut")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "04 DG-IMN Glut"),value="DG-IMN Glut")
-# srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "06 CTX-CGE GABA"),value="CTX-CGE GABA")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "07 CTX-MGE GABA"),value="CTX-MGE GABA")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "30 Astro-Epen"),value="Astro-Epen")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "31 OPC-Oligo"),value="OPC-Oligo")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "33 Vascular"),value="Vascular")
-srat_new_MMC <- SetIdent(srat_new_MMC,WhichCells(object = srat_new_MMC,idents = "34 Immune"),value="Immune")
-
-srat_new_MMC$types <- Idents(srat_new_MMC) 
-
-##cell type composition to check how many cells fall in each category
-tab1_types <- srat_new_MMC@meta.data %>% group_by(sample.origin,types) %>% tally()
-tab1_types
-
-tab2_types <- tab1_types %>% spread(key=types,value=n)
-tab2_types
-
-tab3_types <- tab1 %>% group_by(sample.origin) %>% mutate(n/sum(n)) %>% spread(key=subtypes,value=n)
-tab3_types
+DimPlot(
+  KA_seurat_filtered,
+  group.by = "classes",
+  label = TRUE,
+  repel=TRUE
+) + NoLegend
 ```
 
-
-
-```{r Changing labels class level}
-#################
-###NEURONAL######
-#################
-###Glutamatergic 
-
-Idents(KA_seurat_filtered) <- KA_seurat_filtered$subclass_name
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "016 CA1-ProS Glut"), value = "CA1-ProS Glut Neurons")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "025 CA2-FC-IG Glut"), value = "CA2-FC-IG Glut Neurons")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "017 CA3 Glut"), value = "CA3 Glut Neurons")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "036 HPF CR Glut"), value = "HPF CR Glut Neurons")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "023 SUB-ProS Glut"), value = "SUB-ProS Glut Neurons")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "111 TRS-BAC Sln Glut"), value = "CNU-HYa Glut Neurons")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "116 AVPV-MEPO-SFO Tbr1 Glut"), value = "CNU-HYa Glut Neurons")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "008 L2/3 IT ENT Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "019 L2/3 IT PPP Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "018 L2 IT PPP-APr Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "011 L2 IT ENT-po Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "003 L5/6 IT TPE-ENT Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "020 L2/3 IT RSP Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "007 L2/3 IT CTX Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "009 L2/3 IT PIR-ENTl Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "015 ENTmv-PA-COAp Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "006 L4/5 IT CTX Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "030 L6 CT CTX Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "022 L5 ET CTX Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "004 L6 IT CTX Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "024 L5 PPP Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "005 L5 IT CTX Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "021 L4 RSP-ACA Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "002 IT EP-CLA Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "012 MEA Slc17a7 Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "014 LA-BLA-BMA-PA Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "001 CLA-EPd-CTX Car3 Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "010 IT AON-TT-DP Glut"), value = "IT-ET Glut_others")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "013 COAp Grxcr2 Glut"), value = "IT-ET Glut_others")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "159 IF-RL-CLI-PAG Foxa1 Glut"), value = "MB Glut") #19 MB Glut
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "168 SPA-SPFm-SPFp-POL-PIL-PoT Sp9 Glut"), value = "MB Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "176 SCig Foxb1 Glut"), value = "MB Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "178 SCig Foxb1 Otx2 Glut"), value = "MB Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "181 IC Tfap2d Maf Glut"), value = "MB Glut")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "314 CB Granule Glut"), value = "CB Glut")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "151 TH Prkcd Grin2c Glut"), value = "TH Glut")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "028 L6b/CT ENT Glut"), value = "NP CT L6b Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "029 L6b CTX Glut"), value = "NP CT L6b Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "031 CT SUB Glut"), value = "NP CT L6b Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "033 NP SUB Glut"), value = "NP CT L6b Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "034 NP PPP Glut"), value = "NP CT L6b Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "027 L6b EPd Glut"), value = "NP CT L6b Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "032 L5 NP CTX Glut"), value = "NP CT L6b Glut")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "217 PB Lmx1a Glut"), value = "P Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "222 PB Evx2 Glut"), value = "P Glut")
-
-###Gabaergic
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "192 PPN-CUN-PCG Otp En1 Gaba"), value = "MB GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "202 PRT Tcf7l2 Gaba"), value = "MB GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "203 LGv-SPFp-SPFm Nkx2-2 Tcf7l2 Gaba"), value = "MB GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "209 SCs Pax7 Nfia Gaba"), value = "MB GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "210 PRT Mecom Gaba"), value = "MB GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "213 SCsg Gabrr2 Gaba"), value = "MB GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "304 NTS-PARN Neurod2 Gly-Gaba"), value = "MY GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "271 NI-RPO Gata3 Nr4a2 Gaba"), value = "P GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "278 NLL Gata3 Gly-Gaba"), value = "P GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "311 CBX MLI Megf11 Gaba"), value = "CB GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "243 PGRN-PARN-MDRN Hoxb5 Glut"), value = "MY Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "258 SPVC Nmu Glut"), value = "MY Glut")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "056 Sst Chodl Gaba"), value = "Sst Gaba Neurons")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "053 Sst Gaba"), value = "Sst Gaba Neurons")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "051 Pvalb chandelier Gaba"), value = "Pvalb Gaba")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "052 Pvalb Gaba"), value = "Pvalb Gaba")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "049 Lamp5 Gaba"), value = "Lamp5 Gaba")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "050 Lamp5 Lhx6 Gaba"), value = "Lamp5 Gaba")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "046 Vip Gaba"), value = "Vip Gaba")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "045 OB-STR-CTX Inh IMN"), value = "Inmature GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "041 OB-in Frmd7 Gaba"), value = "Inmature GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "044 OB Dopa-Gaba"), value = "Inmature GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "039 OB Meis2 Thsd7b Gaba"), value = "Inmature GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "042 OB-out Frmd7 Gaba"), value = "Inmature GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "054 STR Prox1 Lhx6 Gaba"), value = "CNU-MGE GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "057 NDB-SI-MA-STRv Lhx8 Gaba"), value = "CNU-MGE GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "058 PAL-STR Gaba-Chol"), value = "CNU-MGE GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "059 GPe-SI Sox6 Cyp26b1 Gaba"), value = "CNU-MGE GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "064 STR-PAL Chst9 Gaba"), value = "CNU-LGE GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "062 STR D2 Gaba"), value = "CNU-LGE GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "063 STR D1 Sema5a Gaba"), value = "CNU-LGE GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "048 RHP-COA Ndnf Gaba"), value = "CTX-CGE GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "047 Sncg Gaba"), value = "CTX-CGE GABA")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "067 LSX Sall3 Pax6 Gaba"), value = "LSX GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "072 LSX Sall3 Lmo1 Gaba"), value = "LSX GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "071 LSX Prdm12 Zeb2 Gaba"), value = "LSX GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "070 LSX Prdm12 Slit2 Gaba"), value = "LSX GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "068 LSX Otx2 Gaba"), value = "LSX GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "069 LSX Nkx2-1 Gaba"), value = "LSX GABA")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "093 RT-ZI Gnb3 Gaba"), value = "HY GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "101 ZI Pax6 Gaba"), value = "HY GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "108 ARH-PVp Tbx3 Gaba"), value = "HY GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "109 LGv-ZI Otx2 Gaba"), value = "HY GABA")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "089 PVR Six3 Sox3 Gaba"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "076 MEA-BST Lhx6 Nfib Gaba"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "078 SI-MA-ACB Ebf1 Bnc2 Gaba"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "080 CEA-AAA-BST Six3 Sp9 Gaba"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "090 BST-MPN Six3 Nrgn Gaba"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "114 COAa-PAA-MEA Barhl2 Glut"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "115 MS-SF Bsx Glut"), value = "CNU-HYa GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "118 ADP-MPO Trp73 Glut"), value = "CNU-HYa GABA")
-
-###Dendate Gyrus 
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "037 DG Glut"), value = "Dendate Gyrus Neurons")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "038 DG-PIR Ex IMN"), value = "DG-PIR Immature Neurons")
-
-
-#################
-###Non-NEURONAL##
-#################
-
-##Oligo
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "326 OPC NN"), value = "Oligo Progenitor Cells")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "327 Oligo NN"), value = "Oligodendrocytes")
-
-##Astrocytes
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "318 Astro-NT NN"), value = "Astrocytes")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "319 Astro-TE NN"), value = "Astrocytes")
-
-#Microglia
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "334 Microglia NN"), value = "Microglia")
-
-
-#Vascular
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "333 Endo NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "331 Peri NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "329 ABC NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "332 SMC NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "335 BAM NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "321 Astroependymal NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "322 Tanycyte NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "323 Ependymal NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "338 Lymphoid NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "337 DC NN"), value = "Vascular cells")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "330 VLMC NN"), value = "Vascular cells")
-
-
-#Choroid plexus
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "325 CHOR NN"), value = "Choroid Plexus")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "324 Hypendymal NN"), value = "Hypendymal")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "336 Monocytes NN"), value = "Monocytes")
-
-KA_seurat_filtered$classes <- Idents(KA_seurat_filtered)
-
-
-```
-
-
-
-```{r Changing labels neighborhood level}
-#################
-###NEURONAL######
-#################
-###Glutamatergic 
-
-Idents(KA_seurat_filtered) <- KA_seurat_filtered$subclass_name
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "016 CA1-ProS Glut"), value = "Pallium-Glut")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "025 CA2-FC-IG Glut"), value = "Pallium-Glut")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "017 CA3 Glut"), value = "Pallium-Glut")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "036 HPF CR Glut"), value = "Pallium-Glut")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "023 SUB-ProS Glut"), value = "Pallium-Glut")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "111 TRS-BAC Sln Glut"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "116 AVPV-MEPO-SFO Tbr1 Glut"), value = "HY-EA-Glut-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "008 L2/3 IT ENT Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "019 L2/3 IT PPP Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "018 L2 IT PPP-APr Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "011 L2 IT ENT-po Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "003 L5/6 IT TPE-ENT Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "020 L2/3 IT RSP Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "007 L2/3 IT CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "009 L2/3 IT PIR-ENTl Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "015 ENTmv-PA-COAp Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "006 L4/5 IT CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "030 L6 CT CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "022 L5 ET CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "004 L6 IT CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "024 L5 PPP Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "005 L5 IT CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "021 L4 RSP-ACA Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "002 IT EP-CLA Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "012 MEA Slc17a7 Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "014 LA-BLA-BMA-PA Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "001 CLA-EPd-CTX Car3 Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "010 IT AON-TT-DP Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "013 COAp Grxcr2 Glut"), value = "Pallium-Glut")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "159 IF-RL-CLI-PAG Foxa1 Glut"), value = "MB-HB-Glut-Sero-Dopa") #19 MB Glut
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "168 SPA-SPFm-SPFp-POL-PIL-PoT Sp9 Glut"), value = "MB-HB-Glut-Sero-Dopa")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "176 SCig Foxb1 Glut"), value = "MB-HB-Glut-Sero-Dopa")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "178 SCig Foxb1 Otx2 Glut"), value = "MB-HB-Glut-Sero-Dopa")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "181 IC Tfap2d Maf Glut"), value = "MB-HB-Glut-Sero-Dopa")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "314 CB Granule Glut"), value = "NN-IMN-GC")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "151 TH Prkcd Grin2c Glut"), value = "TH-EPI-Glut")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "028 L6b/CT ENT Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "029 L6b CTX Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "031 CT SUB Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "033 NP SUB Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "034 NP PPP Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "027 L6b EPd Glut"), value = "Pallium-Glut")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "032 L5 NP CTX Glut"), value = "Pallium-Glut")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "217 PB Lmx1a Glut"), value = "MB-HB-Glut-Sero-Dopa")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "222 PB Evx2 Glut"), value = "MB-HB-Glut-Sero-Dopa")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "243 PGRN-PARN-MDRN Hoxb5 Glut"), value = "MB-HB-Glut-Sero-Dopa")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "258 SPVC Nmu Glut"), value = "MB-HB-Glut-Sero-Dopa")
-###Gabaergic
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "192 PPN-CUN-PCG Otp En1 Gaba"), value = "MB-HB-CB-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "202 PRT Tcf7l2 Gaba"), value = "MB-HB-CB-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "203 LGv-SPFp-SPFm Nkx2-2 Tcf7l2 Gaba"), value = "MB-HB-CB-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "209 SCs Pax7 Nfia Gaba"), value = "MB-HB-CB-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "210 PRT Mecom Gaba"), value = "MB-HB-CB-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "213 SCsg Gabrr2 Gaba"), value = "MB-HB-CB-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "304 NTS-PARN Neurod2 Gly-Gaba"), value = "MB-HB-CB-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "271 NI-RPO Gata3 Nr4a2 Gaba"), value = "MB-HB-CB-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "278 NLL Gata3 Gly-Gaba"), value = "MB-HB-CB-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "311 CBX MLI Megf11 Gaba"), value = "MB-HB-CB-GABA")
-
-
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "056 Sst Chodl Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "053 Sst Gaba"), value = "Subpallium-GABA")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "051 Pvalb chandelier Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "052 Pvalb Gaba"), value = "Subpallium-GABA")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "049 Lamp5 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "050 Lamp5 Lhx6 Gaba"), value = "Subpallium-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "046 Vip Gaba"), value = "Subpallium-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "045 OB-STR-CTX Inh IMN"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "041 OB-in Frmd7 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "044 OB Dopa-Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "039 OB Meis2 Thsd7b Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "042 OB-out Frmd7 Gaba"), value = "Subpallium-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "054 STR Prox1 Lhx6 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "057 NDB-SI-MA-STRv Lhx8 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "058 PAL-STR Gaba-Chol"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "059 GPe-SI Sox6 Cyp26b1 Gaba"), value = "Subpallium-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "064 STR-PAL Chst9 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "062 STR D2 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "063 STR D1 Sema5a Gaba"), value = "Subpallium-GABA")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "048 RHP-COA Ndnf Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "047 Sncg Gaba"), value = "Subpallium-GABA")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "067 LSX Sall3 Pax6 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "072 LSX Sall3 Lmo1 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "071 LSX Prdm12 Zeb2 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "070 LSX Prdm12 Slit2 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "068 LSX Otx2 Gaba"), value = "Subpallium-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "069 LSX Nkx2-1 Gaba"), value = "Subpallium-GABA")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "093 RT-ZI Gnb3 Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "101 ZI Pax6 Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "108 ARH-PVp Tbx3 Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "109 LGv-ZI Otx2 Gaba"), value = "HY-EA-Glut-GABA")
-
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "089 PVR Six3 Sox3 Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "076 MEA-BST Lhx6 Nfib Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "078 SI-MA-ACB Ebf1 Bnc2 Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "080 CEA-AAA-BST Six3 Sp9 Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "090 BST-MPN Six3 Nrgn Gaba"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "114 COAa-PAA-MEA Barhl2 Glut"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "115 MS-SF Bsx Glut"), value = "HY-EA-Glut-GABA")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "118 ADP-MPO Trp73 Glut"), value = "HY-EA-Glut-GABA")
-
-###Dendate Gyrus 
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "037 DG Glut"), value = "Pallium-Glut")
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "038 DG-PIR Ex IMN"), value = "Pallium-Glut")
-
-
-#################
-###Non-NEURONAL##
-#################
-
-##Oligo
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "326 OPC NN"), value = "NN-IMN-GC")
-
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "327 Oligo NN"), value = "NN-IMN-GC")
-
-##Astrocytes
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "318 Astro-NT NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "319 Astro-TE NN"), value = "NN-IMN-GC")
-
-#Microglia
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "334 Microglia NN"), value = "NN-IMN-GC")
-
-
-#Vascular
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "333 Endo NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "331 Peri NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "329 ABC NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "332 SMC NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "335 BAM NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "321 Astroependymal NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "322 Tanycyte NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "323 Ependymal NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "338 Lymphoid NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "337 DC NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "330 VLMC NN"), value = "NN-IMN-GC")
-
-
-#Choroid plexus
-
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "325 CHOR NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "324 Hypendymal NN"), value = "NN-IMN-GC")
-KA_seurat_filtered <- SetIdent(KA_seurat_filtered, WhichCells(object = KA_seurat_filtered, idents = "336 Monocytes NN"), value = "NN-IMN-GC")
-
-
+# Prepare final Seurat object
+
+Subtypes represented by fewer than 10 nuclei were excluded from the
+downstream analyses.
+
+```{r final_object}
+
+# Cell subtypes retained for downstream analysis
+classes_filtering <- c(
+  "Choroid Plexus",
+  "Vascular cells",
+  "Microglia",
+  "Astrocytes",
+  "Oligodendrocytes",
+  "Oligo Progenitor Cells",
+  "DG-PIR Immature Neurons",
+  "Dentate Gyrus Neurons",
+  "CTX-CGE GABA",
+  "Immature GABA Neurons",
+  "VIP GABA Neurons",
+  "Lamp5 GABA Neurons",
+  "Pvalb GABA Neurons",
+  "Sst GABA Neurons",
+  "NP CT L6b Glut",
+  "IT-ET Glut Neurons",
+  "SUB-ProS Glut Neurons",
+  "HPF CR Glut Neurons",
+  "CA3 Glut Neurons",
+  "CA2 Glut Neurons",
+  "CA1 Glut Neurons"
+)
+
+# Keep the cell classes used in the final analysis
+KA_seurat_plots <- subset(
+  KA_seurat_filtered,
+  subset = classes %in% classes_filtering
+)
+
+# Remove unused factor levels
+KA_seurat_plots$classes <- droplevels(
+  KA_seurat_plots$classes
+)
+
+# Check number of nuclei in each retained class
+table(KA_seurat_plots$classes)
+
+# Optional: save object for downstream scripts
+# saveRDS(KA_seurat_plots, "KA_seurat_plots.rds")
 ```
