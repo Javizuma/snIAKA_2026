@@ -39,10 +39,11 @@ Sample identifiers in the GEO/raw data correspond to the following analysis labe
 
 These refer to the same biological samples; only the naming convention differs between the raw data and some downstream analysis scripts.
 
-## Software dependencies
+##  Software environment
 
-R packages required for each analysis are listed at the beginning of the corresponding scripts. Packages can be installed from CRAN, Bioconductor, or their respective GitHub repositories, as appropriate. Please refer to the package documentation for installation instructions and version requirements.
+Analyses were performed in R. The main packages and versions used are listed in package_versions.txt. R packages required for each analysis are listed at the beginning of the corresponding scripts. Packages can be installed from CRAN, Bioconductor, or their respective GitHub repositories, as appropriate. Please refer to the package documentation for installation instructions and version requirements.
 
+Full R session information is available in sessionInfo.txt.
 
 ## Data availability
 
