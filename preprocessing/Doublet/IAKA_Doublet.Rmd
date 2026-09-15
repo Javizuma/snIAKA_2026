@@ -206,7 +206,7 @@ pK_Control2 <- as.numeric(as.character(pK_Control2[[1]]))
 
 ## Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
 homotypic.prop_Control2 <- modelHomotypic(srat_Control2$SCT_snn_res.1)           ## ex: annotations <- seu_kidney@meta.data$ClusteringResults
-nExp_poi_Control2 <- round(0.16*nrow(srat_Control2@meta.data))  ## Assuming 7.5% doublet formation rate - tailor for your dataset
+nExp_poi_Control2 <- round(0.016*nrow(srat_Control2@meta.data))  ## Assuming 7.5% doublet formation rate - tailor for your dataset
 nExp_poi.adj_Control2 <- round(nExp_poi_Control2*(1-homotypic.prop_Control2))
 
 ## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
